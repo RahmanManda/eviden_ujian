@@ -2,135 +2,176 @@ import streamlit as st
 import pandas as pd
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="E-Eviden Ujian", layout="wide")
+st.set_page_config(page_title="E-Eviden Ujian IAIN", layout="wide")
 
 # --- FUNGSI LOAD DATA ---
-# Menggunakan cache agar data tidak didownload berulang kali setiap klik
 @st.cache_data
 def load_data(url):
     try:
-        # Membaca CSV langsung dari Link Publish Google Sheet
+        # Membaca data
         df = pd.read_csv(url)
+        # Convert Timestamp agar bisa disortir
+        df['Timestamp'] = pd.to_datetime(df['Timestamp'], dayfirst=True, errors='coerce')
         return df
     except Exception as e:
-        st.error(f"Gagal membaca data: {e}")
+        st.error(f"Error membaca data: {e}")
         return None
 
-# --- FUNGSI FORMAT GAMBAR ---
-def format_drive_link(url):
+# --- FUNGSI PEMBERSIH LINK GAMBAR ---
+def get_image_url(raw_link):
     """
-    Mengubah link 'open?id=' atau 'file/d/' menjadi link thumbnail
-    yang bisa dirender oleh browser.
+    Mengubah link drive 'open?id=' menjadi link yang bisa tampil gambar.
+    Mendukung multiple link (dipisahkan koma).
     """
-    if not isinstance(url, str):
-        return None
+    if pd.isna(raw_link) or not isinstance(raw_link, str):
+        return []
     
-    # Logika sederhana untuk mengambil ID file Google Drive
-    file_id = ""
-    if "id=" in url:
-        file_id = url.split("id=")[1].split("&")[0]
-    elif "/d/" in url:
-        file_id = url.split("/d/")[1].split("/")[0]
+    # Pisahkan jika ada koma (multiple files)
+    links = [l.strip() for l in raw_link.split(',')]
+    valid_links = []
     
-    if file_id:
-        # Mengembalikan URL format thumbnail
-        return f"https://drive.google.com/uc?id={file_id}"
-    return None
+    for link in links:
+        file_id = ""
+        if "id=" in link:
+            file_id = link.split("id=")[1].split("&")[0]
+        elif "/d/" in link:
+            file_id = link.split("/d/")[1].split("/")[0]
+            
+        if file_id:
+            # Gunakan link thumbnail agar ringan
+            valid_links.append(f"https://drive.google.com/uc?id={file_id}")
+            
+    return valid_links
 
-# --- HEADER APLIKASI ---
-st.title("📂 Portal E-Eviden & Honor Ujian")
-st.markdown("""
-Aplikasi ini untuk memudahkan Dosen/Penguji mengunduh bukti pelaksanaan ujian 
-(Skripsi, Proposal, Komprehensif) sebagai lampiran keuangan.
-""")
-st.markdown("---")
+# --- LOGIKA UTAMA: MENGAMBIL DATA BERDASARKAN JENIS UJIAN ---
+def parse_evidence(row):
+    """
+    Karena kolomnya beda-beda tiap ujian, fungsi ini yang bertugas 'memilih'
+    kolom mana yang harus diambil berdasarkan Jenis Ujian.
+    """
+    jenis = row['Pilih Jenis Ujian']
+    
+    # Default data kosong
+    data = {
+        'ba_files': [],
+        'foto_files': [],
+        'naskah_files': [] # Khusus UAS
+    }
 
-# --- INPUT LINK CSV ---
-# Nanti link ini bisa kita hardcode jika aplikasi sudah fix
-sheet_url = st.text_input("https://docs.google.com/spreadsheets/d/e/2PACX-1vQinSdwQBQZj649QKRimqqmTFQ0WaSlEHucehHOEg7jvTaioDXe0snCcpo3kTJJsnFrIcqEasjif9E8/pub?output=csv", placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv")
+    # LOGIKA MAPPING KOLOM (SESUAI CSV ANDA)
+    if jenis == 'Ujian Akhir Semester (UAS)':
+        data['ba_files'] = get_image_url(row.get('Upload Berita Acara UAS (dalam format PDF/JPG/PNG) '))
+        data['foto_files'] = get_image_url(row.get('Foto/Dokumentasi Pelaksanaan UAS   (dalam format PDF/JPG/PNG) '))
+        data['naskah_files'] = get_image_url(row.get('Naskah Soal UAS   (dalam format PDF/JPG/PNG) '))
+        
+    elif jenis == 'Ujian Proposal':
+        data['ba_files'] = get_image_url(row.get('Upload Berita Acara Ujian Proposal (dalam format PDF)'))
+        data['foto_files'] = get_image_url(row.get('Foto/Dokumentasi Pelaksanaan Ujian Proposal'))
+        
+    elif jenis == 'Ujian Komprehensif':
+        data['ba_files'] = get_image_url(row.get('Upload Berita Acara Ujian Komprehensif (dalam format PDF)'))
+        data['foto_files'] = get_image_url(row.get('Foto/Dokumentasi Pelaksanaan Ujian Komprehensif'))
+        
+    elif jenis == 'Ujian Skripsi':
+        data['ba_files'] = get_image_url(row.get('Upload Berita Acara Ujian Skripsi (dalam format PDF)'))
+        data['foto_files'] = get_image_url(row.get('Foto/Dokumentasi Pelaksanaan Ujian Skripsi'))
+        
+    return data
 
-if sheet_url:
-    df = load_data(sheet_url)
+# --- START APLIKASI ---
+st.title("🎓 Portal Bukti Ujian & Honor Dosen")
 
+# --- 1. INPUT DATA SOURCE ---
+# GANTI LINK INI DENGAN LINK 'PUBLISH TO WEB' MILIK ANDA (CSV FORMAT)
+default_url = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQinSdwQBQZj649QKRimqqmTFQ0WaSlEHucehHOEg7jvTaioDXe0snCcpo3kTJJsnFrIcqEasjif9E8/pub?output=csv" 
+
+# Jika belum di hardcode, munculkan input box
+if "http" not in default_url:
+    url = st.text_input("Masukkan Link CSV Google Sheet (Publish to Web):")
+else:
+    url = default_url
+
+if url:
+    df = load_data(url)
+    
     if df is not None:
-        # --- SIDEBAR FILTER ---
-        st.sidebar.header("🔍 Filter Pencarian")
+        # --- 2. SIDEBAR FILTER ---
+        st.sidebar.header("🔍 Filter Dosen")
         
-        # 1. Deteksi Kolom Nama Dosen (Sesuaikan dengan nama kolom di Sheet Anda)
-        # Asumsi nama kolom di Sheet ada kata "Penguji" atau "Dosen"
-        possible_name_cols = [c for c in df.columns if "nama" in c.lower() or "dosen" in c.lower() or "penguji" in c.lower()]
-        selected_col_name = st.sidebar.selectbox("Pilih Kolom Nama Dosen:", possible_name_cols)
+        # Ambil daftar nama dosen (hapus yang kosong)
+        daftar_dosen = sorted([x for x in df['Nama Dosen'].unique() if pd.notna(x)])
+        selected_dosen = st.sidebar.selectbox("Pilih Nama Dosen:", daftar_dosen)
         
-        # 2. Input Nama Dosen
-        # Mengambil daftar unik nama dosen dari data
-        unique_names = sorted(df[selected_col_name].dropna().unique())
-        selected_dosen = st.sidebar.selectbox("Pilih Nama Dosen:", unique_names)
+        # Filter dataframe
+        df_dosen = df[df['Nama Dosen'] == selected_dosen].copy()
         
-        # 3. Filter Data
-        filtered_df = df[df[selected_col_name] == selected_dosen]
+        # --- 3. TAMPILAN UTAMA ---
+        st.subheader(f"Rekap Kegiatan: {selected_dosen}")
         
-        # --- TAMPILAN UTAMA ---
-        st.subheader(f"Hasil Pencarian: {selected_dosen}")
-        st.info(f"Ditemukan {len(filtered_df)} kegiatan ujian.")
+        # Metric ringkas
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Total Kegiatan", len(df_dosen))
+        col_m2.metric("Ujian Skripsi/Tesis", len(df_dosen[df_dosen['Pilih Jenis Ujian'].str.contains('Skripsi', na=False)]))
+        col_m3.metric("UAS", len(df_dosen[df_dosen['Pilih Jenis Ujian'].str.contains('UAS', na=False)]))
+        
+        st.divider()
 
-        # Tampilkan Tabel Data Sederhana
-        st.dataframe(filtered_df)
-
-        st.markdown("### 📸 Galeri Bukti & Download")
-        
-        # Loop untuk menampilkan kartu per kegiatan
-        for index, row in filtered_df.iterrows():
-            with st.container():
-                # Membuat tampilan seperti kartu
-                c1, c2, c3 = st.columns([1, 1, 2])
+        # Loop setiap baris data dosen tersebut
+        for idx, row in df_dosen.iterrows():
+            evidence = parse_evidence(row)
+            
+            with st.expander(f"{row['Timestamp'].strftime('%d %b %Y')} - {row['Pilih Jenis Ujian']} ({row.get('Nama Matkul', '-')})", expanded=True):
                 
-                # Asumsi kolom foto ada kata "foto" atau "bukti" atau "dokumentasi"
-                foto_cols = [c for c in df.columns if "foto" in c.lower() or "upload" in c.lower()]
+                c1, c2 = st.columns([1, 2])
                 
                 with c1:
-                    st.write(f"**Kegiatan #{index+1}**")
-                    # Tampilkan data penting (Timestamp, Jenis Ujian, dll)
-                    # Sesuaikan 'Timestamp' dengan nama kolom tanggal di sheet Anda
-                    if 'Timestamp' in row:
-                        st.write(f"📅 {row['Timestamp']}")
+                    st.markdown("#### Detail Kegiatan")
+                    st.write(f"**Prodi:** {row.get('Program Studi', '-')}")
+                    st.write(f"**Semester:** {row.get('Semester', '-')}")
+                    if pd.notna(row.get('Nama Kelas')):
+                        st.write(f"**Kelas:** {row['Nama Kelas']}")
                     
-                    # Mencari kolom jenis ujian
-                    jenis_ujian = [c for c in df.columns if "jenis" in c.lower() or "ujian" in c.lower()]
-                    if jenis_ujian:
-                         st.write(f"📝 {row[jenis_ujian[0]]}")
+                    st.info("Klik kanan pada gambar -> 'Save Image' untuk mengunduh bukti.")
 
-                # Menampilkan Foto (Jika ada link)
-                if foto_cols:
-                    img_url_raw = row[foto_cols[0]] # Ambil kolom foto pertama
-                    img_url_clean = format_drive_link(img_url_raw)
+                with c2:
+                    st.markdown("#### 📸 Bukti Dokumentasi")
                     
-                    with c2:
-                        if img_url_clean:
-                            st.image(img_url_clean, caption="Bukti Pelaksanaan", width=200)
+                    # Tampilkan Tab jika ada banyak jenis bukti
+                    tab1, tab2, tab3 = st.tabs(["Foto Pelaksanaan", "Berita Acara", "Naskah Soal"])
+                    
+                    with tab1:
+                        if evidence['foto_files']:
+                            # Tampilkan gallery
+                            cols = st.columns(len(evidence['foto_files']))
+                            for i, img_url in enumerate(evidence['foto_files']):
+                                cols[i].image(img_url, width=200, caption=f"Foto {i+1}")
                         else:
-                            st.warning("Tidak ada foto / Link rusak")
-                
-                with c3:
-                    st.success("✅ Data Valid")
-                    # Tombol copy link (Simulasi)
-                    st.code(row[foto_cols[0]] if foto_cols else "No Link", language="text")
-                    st.caption("Salin link di atas jika gambar tidak muncul.")
-                
-                st.divider()
+                            st.warning("Tidak ada foto pelaksanaan.")
+                            
+                    with tab2:
+                        if evidence['ba_files']:
+                            for img_url in evidence['ba_files']:
+                                st.image(img_url, width=200, caption="Berita Acara")
+                        else:
+                            st.warning("Tidak ada Berita Acara.")
 
-        # --- TOMBOL DOWNLOAD REKAP ---
+                    with tab3:
+                        if evidence['naskah_files']:
+                            for img_url in evidence['naskah_files']:
+                                st.image(img_url, width=200, caption="Naskah Soal")
+                        else:
+                            st.write("-")
+
+        # --- 4. DOWNLOAD REKAP ---
         st.sidebar.markdown("---")
-        st.sidebar.write("📥 **Unduh Laporan**")
         
-        # Konversi data filter ke CSV untuk didownload dosen
-        csv = filtered_df.to_csv(index=False).encode('utf-8')
+        # Buat dataframe bersih untuk didownload (Hanya kolom penting)
+        download_df = df_dosen[['Timestamp', 'Nama Dosen', 'Pilih Jenis Ujian', 'Program Studi', 'Nama Matkul', 'Nama Kelas']]
+        csv = download_df.to_csv(index=False).encode('utf-8')
         
         st.sidebar.download_button(
-            label="Download Rekap (Excel/CSV)",
-            data=csv,
-            file_name=f"Rekap_Honor_{selected_dosen}.csv",
-            mime="text/csv",
+            "📥 Download Rekap (Excel/CSV)",
+            csv,
+            f"Laporan_{selected_dosen}.csv",
+            "text/csv"
         )
-
-    else:
-        st.warning("Menunggu input Link CSV yang valid...")
