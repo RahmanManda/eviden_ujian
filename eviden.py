@@ -79,7 +79,7 @@ def parse_evidence(row):
     return data
 
 # --- START APLIKASI ---
-st.title("🎓 Portal Bukti Ujian & Honor Dosen")
+st.title("🎓 Portal Evidence Ujian")
 
 # --- 1. INPUT DATA SOURCE ---
 # GANTI LINK INI DENGAN LINK 'PUBLISH TO WEB' MILIK ANDA (CSV FORMAT)
@@ -175,3 +175,4 @@ if url:
             f"Laporan_{selected_dosen}.csv",
             "text/csv"
         )
+
